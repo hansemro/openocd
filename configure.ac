@@ -135,6 +135,7 @@ m4_define([USB1_ADAPTERS],
 	[[armjtagew], [Olimex ARM-JTAG-EW Programmer], [ARMJTAGEW]],
 	[[rlink], [Raisonance RLink JTAG Programmer], [RLINK]],
 	[[usbprog], [USBProg JTAG Programmer], [USBPROG]],
+	[[xpc_usb], [Xilinx Platform Cable USB Compatible], [XPC_USB]],
 	[[esp_usb_jtag], [Espressif JTAG Programmer], [ESP_USB_JTAG]]])
 
 m4_define([HIDAPI_ADAPTERS],

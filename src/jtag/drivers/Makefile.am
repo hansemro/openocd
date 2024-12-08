@@ -204,6 +204,9 @@ endif
 if AM335XGPIO
 DRIVERFILES += %D%/am335xgpio.c
 endif
+if XPC_USB
+DRIVERFILES += %D%/xpc_usb.c
+endif
 
 DRIVERHEADERS = \
 	%D%/bitbang.h \
