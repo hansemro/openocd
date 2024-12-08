@@ -493,6 +493,22 @@ Both Nu-Link v1 and v2 are supported.
 ARM has released a interface standard called CMSIS-DAP that simplifies connecting
 debuggers to ARM Cortex based targets @url{http://www.keil.com/support/man/docs/dapdebug/dapdebug_introduction.htm}.
 
+@section AMD/Xilinx Platform Cable USB (I/II) based
+AMD/Xilinx has released several USB-based JTAG adapters that are available
+either as a stand-alone dongle (DLC9/DLC10) or embedded on development boards.
+These dongles have a configurable TCK frequency divider allowing the it to
+perform bulk JTAG shift operations between 750 kHz to 24 MHz.
+
+Platform cable firmware must be loaded prior to use with OpenOCD. Adapters with
+loaded firmware should enumerate with VID/PID=03fd:0008.
+
+@itemize @bullet
+@item @b{Xilinx Platform Cable USB (DLC9/DLC9LP/DLC9G)}
+@item @b{AMD/Xilinx Platform Cable USB II (DLC10)}
+@* Link: @url{https://www.xilinx.com/products/boards-and-kits/hw-usb-ii-g.html}
+@item @b{Xilinx ML605/SP60X embedded USB JTAG}
+@end itemize
+
 @section USB Other
 @itemize @bullet
 @item @b{USBprog}

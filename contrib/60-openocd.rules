@@ -262,4 +262,7 @@ ATTRS{idVendor}=="c251", ATTRS{idProduct}=="2750", MODE="660", GROUP="plugdev", 
 # CMSIS-DAP compatible adapters
 ATTRS{product}=="*CMSIS-DAP*", MODE="660", GROUP="plugdev", TAG+="uaccess"
 
+# AMD/Xilinx Platform Cable USB (II)
+ATTRS{idVendor}=="03fd", ATTRS{idProduct}=="0008", MODE="660", GROUP="plugdev", TAG+="uaccess"
+
 LABEL="openocd_rules_end"

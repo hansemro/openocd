@@ -23,7 +23,8 @@ The dumps are organized in subfolders corresponding to OpenOCD drivers:
 - kitprog;
 - nulink;
 - stlink;
-- xds110.
+- xds110;
+- xpc_usb.
 
 The script above assumes the user has granted access permissions to the USB
 device file in
