@@ -164,10 +164,10 @@ void *buf_set_buf(const void *_src, unsigned int src_start,
 
 uint32_t flip_u32(uint32_t value, unsigned int num)
 {
-	uint32_t c = (bit_reverse_table256[value & 0xff] << 24) |
-		(bit_reverse_table256[(value >> 8) & 0xff] << 16) |
-		(bit_reverse_table256[(value >> 16) & 0xff] << 8) |
-		(bit_reverse_table256[(value >> 24) & 0xff]);
+	uint32_t c = ((uint32_t)(bit_reverse_table256[value & 0xff]) << 24) |
+		((uint32_t)(bit_reverse_table256[(value >> 8) & 0xff]) << 16) |
+		((uint32_t)(bit_reverse_table256[(value >> 16) & 0xff]) << 8) |
+		((uint32_t)(bit_reverse_table256[(value >> 24) & 0xff]));
 
 	if (num < 32)
 		c = c >> (32 - num);
