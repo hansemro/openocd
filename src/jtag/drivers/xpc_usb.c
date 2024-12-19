@@ -33,6 +33,14 @@
 /** Product ID for Platform Cable USB (II) with firmware loaded */
 #define PLATFORM_CABLE_PID		0x0008
 
+/** Adapter Types */
+enum xpc_type {
+	XPC_UNKNOWN_TYPE =			0x0,
+	// ML605/SP60X USB-JTAG and Platform Cable USB I/DLC9 share the same type
+	XPC_DLC9_TYPE =				0x4,
+	XPC_DLC10_TYPE =			0x5,
+};
+
 /** XPC base clock frequency */
 #define XPC_BASE_FREQUENCY		24000000UL
 
@@ -77,8 +85,8 @@ struct xpc_usb_cmd_buf {
 	size_t num_pending_ops;
 	/* Current number of TDO bits to shift out. */
 	size_t num_pending_tdo_bits;
-	/* Points to a memory-allocated array of 32-bit packed TDO bits after
-	 * flushing queue with (XPC_TDO|XPC_TCK) operation(s) or NULL otherwise. */
+	/* Points to 32-bit packed array of TDO samples after flushing queue
+	 * with (XPC_TDO|XPC_TCK) operation(s) or NULL otherwise. */
 	uint32_t *tdo_bits;
 	/* Number of TDO bits shifted out. */
 	size_t num_tdo_bits;
@@ -89,6 +97,7 @@ struct xpc_usb {
 	unsigned int ep_in;
 	unsigned int ep_out;
 	struct libusb_device_handle *dev;
+	enum xpc_type type;
 
 	struct xpc_usb_cmd_buf *cmd_buf;
 };
@@ -104,6 +113,7 @@ static int xpc_usb_set_prescaler(struct xpc_usb *device, int value);
 static int xpc_usb_output_enable(struct xpc_usb *device, int enable);
 static int xpc_usb_write_gpio(struct xpc_usb *device, uint8_t bits);
 static int xpc_usb_read_gpio(struct xpc_usb *device, uint8_t *bits);
+static int xpc_usb_read_type(struct xpc_usb *device);
 static int xpc_usb_read_firmware_version(struct xpc_usb *device, uint16_t *version);
 static int xpc_usb_read_pld_version(struct xpc_usb *device, uint16_t *version);
 static int xpc_usb_jtag_transfer(struct xpc_usb *device, size_t num_ops,
@@ -191,6 +201,7 @@ static int xpc_usb_close(struct xpc_usb **device)
  */
 static int xpc_usb_set_prescaler(struct xpc_usb *device, int value)
 {
+	// frequency does not change outside range [0xf:0x14]
 	if (value < 0xf || value > 0x14)
 		return ERROR_FAIL;
 	return jtag_libusb_control_transfer(device->dev, 0x40, 0xB0, 0x0028,
@@ -215,9 +226,32 @@ static int xpc_usb_read_gpio(struct xpc_usb *device, uint8_t *bits)
 			0, (char *)bits, 1, 1000, NULL);
 }
 
+static int xpc_usb_read_type(struct xpc_usb *device)
+{
+	uint8_t buf[2] = {0};
+	uint16_t type = 0;
+	int err = jtag_libusb_control_transfer(device->dev, 0xC0, 0xB0, 0x0050,
+			0x0102, (char *)buf, 2, 1000, NULL);
+	if (err == ERROR_OK) {
+		type = le_to_h_u16(buf);
+		switch (type) {
+		case XPC_DLC9_TYPE:
+			device->type = XPC_DLC9_TYPE;
+			break;
+		case XPC_DLC10_TYPE:
+			device->type = XPC_DLC10_TYPE;
+			break;
+		default:
+			LOG_WARNING("Unknown type: %d", type);
+			device->type = XPC_UNKNOWN_TYPE;
+		}
+	}
+	return err;
+}
+
 static int xpc_usb_read_firmware_version(struct xpc_usb *device, uint16_t *version)
 {
-	uint8_t buf[2] = {0, 0};
+	uint8_t buf[2] = {0};
 	int err = jtag_libusb_control_transfer(device->dev, 0xC0, 0xB0, 0x0050,
 			0x0000, (char *)buf, 2, 1000, NULL);
 	if (err == ERROR_OK)
@@ -227,9 +261,10 @@ static int xpc_usb_read_firmware_version(struct xpc_usb *device, uint16_t *versi
 
 static int xpc_usb_read_pld_version(struct xpc_usb *device, uint16_t *version)
 {
-	uint8_t buf[2] = {0, 0};
+	uint8_t buf[2] = {0};
 	int err = jtag_libusb_control_transfer(device->dev, 0xC0, 0xB0, 0x0050,
-				0x0001, (char *)buf, 2, 1000, NULL);
+				device->type == XPC_DLC10_TYPE ? 0x0002 : 0x0001,
+				(char *)buf, 2, 1000, NULL);
 	if (err == ERROR_OK)
 		*version = le_to_h_u16(buf);
 	return err;
@@ -903,6 +938,11 @@ static int xpc_usb_init(void)
 			&xpc_usb_handle->ep_out, -1, -1, -1, -1);
 	if (err != ERROR_OK)
 		goto out_err;
+
+	err = xpc_usb_read_type(xpc_usb_handle);
+	if (err != ERROR_OK)
+		goto out_err;
+	LOG_INFO("XPC-USB adapter type %d", xpc_usb_handle->type);
 
 	err = xpc_usb_set_prescaler(xpc_usb_handle, 0x11);
 	if (err != ERROR_OK)
