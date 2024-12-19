@@ -87,9 +87,9 @@ struct xpc_usb_cmd_buf {
 	size_t num_pending_tdo_bits;
 	/* Points to 32-bit packed array of TDO samples after flushing queue
 	 * with (XPC_TDO|XPC_TCK) operation(s) or NULL otherwise. */
-	uint32_t *tdo_bits;
+	uint32_t *shifted_tdo_bits;
 	/* Number of TDO bits shifted out. */
-	size_t num_tdo_bits;
+	size_t num_shifted_tdo_bits;
 };
 
 /** XPC adapter */
@@ -472,11 +472,11 @@ static int xpc_usb_clear_queue(struct xpc_usb *device, bool clear_tdo_bits)
 	device->cmd_buf->num_pending_tdo_bits = 0;
 	memset(device->cmd_buf->cmds, 0x00, XPC_BUF_SIZE * sizeof(uint8_t));
 	if (clear_tdo_bits) {
-		if (device->cmd_buf->tdo_bits) {
-			free(device->cmd_buf->tdo_bits);
-			device->cmd_buf->tdo_bits = NULL;
+		if (device->cmd_buf->shifted_tdo_bits) {
+			free(device->cmd_buf->shifted_tdo_bits);
+			device->cmd_buf->shifted_tdo_bits = NULL;
 		}
-		device->cmd_buf->num_tdo_bits = 0;
+		device->cmd_buf->num_shifted_tdo_bits = 0;
 	}
 	return ERROR_OK;
 }
@@ -506,15 +506,15 @@ static int xpc_usb_flush_queue(struct xpc_usb *device)
 	assert(device->cmd_buf->num_pending_tdo_bits <= XPC_MAX_PENDING_TDO_BITS);
 
 	if (device->cmd_buf->num_pending_tdo_bits > 0) {
-		if (device->cmd_buf->tdo_bits) {
+		if (device->cmd_buf->shifted_tdo_bits) {
 			LOG_DEBUG_IO("Discarding/freeing previous tdo_bits before transfer");
-			free(device->cmd_buf->tdo_bits);
-			device->cmd_buf->tdo_bits = NULL;
+			free(device->cmd_buf->shifted_tdo_bits);
+			device->cmd_buf->shifted_tdo_bits = NULL;
 		}
 		out_len = DIV_ROUND_UP(device->cmd_buf->num_pending_tdo_bits, 32) * sizeof(uint32_t);
-		device->cmd_buf->tdo_bits = calloc(out_len, sizeof(uint32_t));
-		device->cmd_buf->num_tdo_bits = 0;
-		if (!device->cmd_buf->tdo_bits) {
+		device->cmd_buf->shifted_tdo_bits = calloc(out_len, sizeof(uint32_t));
+		device->cmd_buf->num_shifted_tdo_bits = 0;
+		if (!device->cmd_buf->shifted_tdo_bits) {
 			LOG_DEBUG("Failed to allocate %zu bytes for %zu bits", out_len,
 					device->cmd_buf->num_pending_tdo_bits);
 			return ERROR_FAIL;
@@ -523,10 +523,10 @@ static int xpc_usb_flush_queue(struct xpc_usb *device)
 
 	err = xpc_usb_jtag_transfer(device, device->cmd_buf->num_pending_ops,
 			device->cmd_buf->cmds, device->cmd_buf->num_pending_tdo_bits,
-			device->cmd_buf->tdo_bits);
+			device->cmd_buf->shifted_tdo_bits);
 
 	if (err == ERROR_OK) {
-		device->cmd_buf->num_tdo_bits = device->cmd_buf->num_pending_tdo_bits;
+		device->cmd_buf->num_shifted_tdo_bits = device->cmd_buf->num_pending_tdo_bits;
 		xpc_usb_clear_queue(device, false);
 	}
 
@@ -655,9 +655,9 @@ static int xpc_usb_queue_scan(struct xpc_usb *device, struct jtag_command *cmd)
 		goto out_err;
 	}
 
-	assert(!device->cmd_buf->tdo_bits);
+	assert(!device->cmd_buf->shifted_tdo_bits);
 	assert(device->cmd_buf->num_pending_tdo_bits == 0);
-	assert(device->cmd_buf->num_tdo_bits == 0);
+	assert(device->cmd_buf->num_shifted_tdo_bits == 0);
 
 	// Shift in/out data with TMS asserted for last bit
 	rd_ptr = buf;
@@ -689,15 +689,15 @@ static int xpc_usb_queue_scan(struct xpc_usb *device, struct jtag_command *cmd)
 				goto out_err;
 			if (type != SCAN_OUT) {
 				for (size_t i = 0; conv_ptr < rd_ptr; i++) {
-					conv = MIN(32, device->cmd_buf->num_tdo_bits);
+					conv = MIN(32, device->cmd_buf->num_shifted_tdo_bits);
 					buf_set_u32(conv_ptr, 0, conv,
-							device->cmd_buf->tdo_bits[i]);
-					device->cmd_buf->num_tdo_bits -= conv;
+							device->cmd_buf->shifted_tdo_bits[i]);
+					device->cmd_buf->num_shifted_tdo_bits -= conv;
 					conv_ptr += sizeof(uint32_t);
 				}
-				free(device->cmd_buf->tdo_bits);
-				device->cmd_buf->tdo_bits = NULL;
-				device->cmd_buf->num_tdo_bits = 0;
+				free(device->cmd_buf->shifted_tdo_bits);
+				device->cmd_buf->shifted_tdo_bits = NULL;
+				device->cmd_buf->num_shifted_tdo_bits = 0;
 			}
 		}
 	}
