@@ -68,13 +68,13 @@ enum xpc_type {
 /** Maximum number of frames that can fit in the command queue */
 #define XPC_MAX_CMD_FRAMES		(XPC_BUF_SIZE / XPC_FRAME_SIZE)
 
-/** Assert TDI high */
+/** Assert TDI high in a TCK cycle */
 #define XPC_TDI					BIT(0)
-/** Assert TMS high */
+/** Assert TMS high in a TCK cycle */
 #define XPC_TMS					BIT(4)
 /** Generate rising-then-falling TCK pulse */
 #define XPC_TCK					BIT(8)
-/** Shift out TDO on rising edge of TCK */
+/** Read a shifted TDO bit */
 #define XPC_TDO					BIT(12)
 
 /** XPC command queue */
@@ -325,7 +325,7 @@ static int xpc_usb_jtag_transfer(struct xpc_usb *device, size_t num_ops, uint8_t
 	if (num_ops == 0 || num_ops > XPC_MAX_PENDING_OPS)
 		return ERROR_FAIL;
 
-	// up-to 0x3000 TDO bits can be shifted out per jtag transfer
+	// up-to 0x3000 TDO bits can be shifted out per transfer, but limit to 0x2000
 	if (num_tdo_bits > XPC_MAX_PENDING_TDO_BITS)
 		return ERROR_FAIL;
 
@@ -385,6 +385,8 @@ static int xpc_usb_jtag_transfer(struct xpc_usb *device, size_t num_ops, uint8_t
 			return err;
 		}
 
+		assert((size_t)actual <= rd_size);
+
 		// Process little endian u32/u16 TDO bits and write out to destination
 		// in host endian u32
 		rd_ptr = rd_buf;
@@ -411,7 +413,11 @@ static int xpc_usb_jtag_transfer(struct xpc_usb *device, size_t num_ops, uint8_t
 /**************************** JTAG queue functions ****************************/
 
 /**
- * Append XPC JTAG command to queue.
+ * Append XPC JTAG command to the queue.
+ *
+ * If the queue is full with no pending TDO reads, then queue will be flushed
+ * before appending the command. Otherwise, if there are pending TDO reads,
+ * the command will not be appended and this will return ERROR_FAIL;
  *
  * @param device XPC adapter handle
  * @return on success: ERROR_OK
@@ -460,7 +466,7 @@ static int xpc_usb_queue_cmd(struct xpc_usb *device, uint16_t cmd)
 }
 
 /**
- * Clear XPC command queue.
+ * Clear XPC command queue and, optionally, the shifted TDO bits.
  *
  * @param device XPC adapter handle
  * @return on success: ERROR_OK
@@ -482,7 +488,7 @@ static int xpc_usb_clear_queue(struct xpc_usb *device, bool clear_tdo_bits)
 }
 
 /**
- * Execute and flush XPC command queue.
+ * Execute and flush the XPC command queue.
  *
  * A buffer for TDO bits that were shifted out will be allocated but should
  * eventually be cleared by caller with xpc_usb_clear_queue(device, true).
