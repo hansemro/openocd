@@ -21,11 +21,20 @@
 #include <jtag/jtag.h>
 #include <jtag/interface.h>
 #include <jtag/commands.h>
+#include "target/image.h"
 #include "libusb_helper.h"
+#include "libusb.h"
 #include <helper/binarybuffer.h>
+#include <helper/command.h>
 #include <helper/bits.h>
 #include <helper/log.h>
 #include <helper/types.h>
+
+#define EZUSB_CPUCS 			0xe600
+#define CPU_RESET				1
+
+/** Maximum size of a single firmware section. Entire EZ-USB code space = 16kB */
+#define SECTION_BUFFERSIZE		1638
 
 /** Vendor ID */
 #define XILINX_VID				0x03fd
@@ -107,6 +116,9 @@ struct xpc_usb {
 /** USB helper functions */
 static int xpc_usb_open(struct xpc_usb **device);
 static int xpc_usb_close(struct xpc_usb **device);
+static int load_xpc_usb_firmware(struct libusb_device_handle *libusb_dev, char *firmware_path);
+static int xpc_usb_write_firmware_section(struct libusb_device_handle *libusb_dev,
+		struct image *firmware_image, int section_index);
 
 /** XPC-specific functions */
 static int xpc_usb_set_prescaler(struct xpc_usb *device, int value);
@@ -143,6 +155,10 @@ static int xpc_usb_khz(int khz, int *jtag_speed);
 
 /****************************** Global variables ******************************/
 
+static uint16_t xpc_usb_uninit_vid = 0x0000;
+static uint16_t xpc_usb_uninit_pid = 0x0000;
+static char *xpc_usb_firmware_path;
+
 static struct xpc_usb *xpc_usb_handle;
 
 /**************************** USB helper functions ****************************/
@@ -156,15 +172,48 @@ static struct xpc_usb *xpc_usb_handle;
  */
 static int xpc_usb_open(struct xpc_usb **device)
 {
-	const uint16_t vids[] = { XILINX_VID, 0 };
-	const uint16_t pids[] = { PLATFORM_CABLE_PID, 0 };
+	const uint16_t vids_uninit[] = { xpc_usb_uninit_vid, 0 };
+	const uint16_t pids_uninit[] = { xpc_usb_uninit_pid, 0 };
+	const uint16_t vids_renum[] = { XILINX_VID, 0 };
+	const uint16_t pids_renum[] = { PLATFORM_CABLE_PID, 0 };
 	struct libusb_device_handle *dev;
+	bool renumeration = false;
+	int err;
 
-	if (jtag_libusb_open(vids, pids, NULL, &dev, NULL) != ERROR_OK)
-		return ERROR_FAIL;
+	if (jtag_libusb_open(vids_uninit, pids_uninit, NULL, &dev, NULL) == ERROR_OK) {
+		LOG_INFO("XPC-USB (uninitialized) found");
+		LOG_INFO("Loading firmware (%s)...", xpc_usb_firmware_path);
+		err = load_xpc_usb_firmware(dev, xpc_usb_firmware_path);
+		libusb_reset_device(dev);
+		jtag_libusb_close(dev);
+		sleep(5);
+		if (err != ERROR_OK)
+			return err;
+		renumeration = true;
+	}
+
+	if (!renumeration) {
+		if (jtag_libusb_open(vids_renum, pids_renum, NULL, &dev, NULL) != ERROR_OK) {
+			LOG_ERROR("XPC-USB not found");
+			return ERROR_FAIL;
+		}
+	} else {
+		int retry = 10;
+		while (jtag_libusb_open(vids_renum, pids_renum, NULL, &dev, NULL) != ERROR_OK && retry--) {
+			usleep(1000000);
+			LOG_INFO("Waiting for reenumeration...");
+		}
+
+		if (!retry) {
+			LOG_ERROR("XPC-USB not found");
+			return ERROR_FAIL;
+		}
+	}
 
 	*device = calloc(1, sizeof(struct xpc_usb));
 	(*device)->dev = dev;
+	(*device)->cmd_buf = calloc(1, sizeof(struct xpc_usb_cmd_buf));
+	(*device)->cmd_buf->cmds = calloc(XPC_BUF_SIZE, sizeof(uint8_t));
 
 	return ERROR_OK;
 }
@@ -184,6 +233,133 @@ static int xpc_usb_close(struct xpc_usb **device)
 		libusb_close((*device)->dev);
 		(*device)->dev = NULL;
 	}
+	if (xpc_usb_firmware_path)
+		free(xpc_usb_firmware_path);
+	return ERROR_OK;
+}
+
+static int load_xpc_usb_firmware(struct libusb_device_handle *libusb_dev, char *firmware_path) {
+	struct image xpc_usb_firmware_image;
+	int err;
+
+	if (!firmware_path) {
+		LOG_ERROR("No firmware path specified");
+		return ERROR_FAIL;
+	}
+
+	if (libusb_claim_interface(libusb_dev, 0) != ERROR_OK) {
+		LOG_ERROR("unable to claim interface");
+		return ERROR_JTAG_INIT_FAILED;
+	}
+
+	xpc_usb_firmware_image.base_address = 0;
+	xpc_usb_firmware_image.base_address_set = false;
+
+	err = image_open(&xpc_usb_firmware_image, firmware_path, "ihex");
+	if (err != ERROR_OK) {
+		LOG_ERROR("Could not load firmware image");
+		goto error_release_usb;
+	}
+
+	/** A host loader program must write 0x01 to the CPUCS register
+	 * to put the CPU into RESET, load all or part of the EZUSB
+	 * RAM with firmware, then reload the CPUCS register
+	 * with ‘0’ to take the CPU out of RESET. The CPUCS register
+	 * (at 0xE600) is the only EZ-USB register that can be written
+	 * using the Firmware Download command.
+	 */
+
+	char value = CPU_RESET;
+	jtag_libusb_control_transfer(libusb_dev,
+			LIBUSB_REQUEST_TYPE_VENDOR |
+			LIBUSB_ENDPOINT_OUT,
+			0xA0,
+			EZUSB_CPUCS,
+			0,
+			&value,
+			1,
+			100,
+			NULL);
+
+	/* Download all sections in the image */
+	for (unsigned int i = 0; i < xpc_usb_firmware_image.num_sections; i++) {
+		err = xpc_usb_write_firmware_section(libusb_dev,
+						     &xpc_usb_firmware_image, i);
+		if (err != ERROR_OK) {
+			LOG_ERROR("Error while downloading the firmware");
+			goto error_close_firmware;
+		}
+	}
+
+	value = !CPU_RESET;
+	jtag_libusb_control_transfer(libusb_dev,
+			LIBUSB_REQUEST_TYPE_VENDOR |
+			LIBUSB_ENDPOINT_OUT,
+			0xA0,
+			EZUSB_CPUCS,
+			0,
+			&value,
+			1,
+			100,
+			NULL);
+
+error_close_firmware:
+	image_close(&xpc_usb_firmware_image);
+
+error_release_usb:
+	libusb_release_interface(libusb_dev, 0);
+	return err;
+}
+
+static int xpc_usb_write_firmware_section(struct libusb_device_handle *libusb_dev,
+		struct image *firmware_image, int section_index)
+{
+	uint16_t chunk_size;
+	uint8_t data[SECTION_BUFFERSIZE];
+	uint8_t *data_ptr = data;
+	size_t size_read;
+
+	uint16_t size = (uint16_t)firmware_image->sections[section_index].size;
+	uint16_t addr = (uint16_t)firmware_image->sections[section_index].base_address;
+
+	LOG_DEBUG("section %02i at addr 0x%04x (size 0x%04x)", section_index, addr,
+		size);
+
+	/* Copy section contents to local buffer */
+	int ret = image_read_section(firmware_image, section_index, 0, size, data,
+			&size_read);
+
+	if ((ret != ERROR_OK) || (size_read != size)) {
+		/* Propagating the return code would return '0' (misleadingly indicating
+		 * successful execution of the function) if only the size check fails. */
+		return ERROR_FAIL;
+	}
+
+	uint16_t bytes_remaining = size;
+
+	/* Send section data in chunks of up to 64 bytes to ULINK */
+	while (bytes_remaining > 0) {
+		if (bytes_remaining > 64)
+			chunk_size = 64;
+		else
+			chunk_size = bytes_remaining;
+
+		jtag_libusb_control_transfer(libusb_dev,
+					     LIBUSB_REQUEST_TYPE_VENDOR |
+					     LIBUSB_ENDPOINT_OUT,
+					     0xA0,
+					     addr,
+					     0,
+					     (char *)data_ptr,
+					     chunk_size,
+					     100,
+					     NULL);
+
+		bytes_remaining -= chunk_size;
+		addr += chunk_size;
+		data_ptr += chunk_size;
+	}
+
 	return ERROR_OK;
 }
 
@@ -995,9 +1171,6 @@ static int xpc_usb_init(void)
 	if (err != ERROR_OK)
 		goto out_err;
 
-	xpc_usb_handle->cmd_buf = calloc(1, sizeof(struct xpc_usb_cmd_buf));
-	xpc_usb_handle->cmd_buf->cmds = calloc(XPC_BUF_SIZE, sizeof(uint8_t));
-
 	return ERROR_OK;
 
 out_err:
@@ -1102,6 +1275,52 @@ static int xpc_usb_khz(int khz, int *jtag_speed)
 	return ERROR_OK;
 }
 
+COMMAND_HANDLER(xpc_usb_handle_vid_pid_command)
+{
+	if (CMD_ARGC != 2)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	COMMAND_PARSE_NUMBER(u16, CMD_ARGV[0], xpc_usb_uninit_vid);
+	COMMAND_PARSE_NUMBER(u16, CMD_ARGV[1], xpc_usb_uninit_pid);
+	return ERROR_OK;
+}
+
+COMMAND_HANDLER(xpc_usb_firmware_command)
+{
+	if (CMD_ARGC != 1)
+		return ERROR_COMMAND_SYNTAX_ERROR;
+	xpc_usb_firmware_path = strdup(CMD_ARGV[0]);
+	return ERROR_OK;
+}
+
+static const struct command_registration xpc_usb_subcommand_handlers[] = {
+	{
+		.name = "vid_pid",
+		.handler = xpc_usb_handle_vid_pid_command,
+		.mode = COMMAND_CONFIG,
+		.help = "the vendor ID and product ID of the uninitialized XPC-USB",
+		.usage = "vid_uninit pid_uninit",
+	},
+	{
+		.name = "firmware",
+		.handler = xpc_usb_firmware_command,
+		.mode = COMMAND_CONFIG,
+		.help = "configure path to XPC-USB firmware location",
+		.usage = "path/to/xusb_xxxx.hex",
+	},
+	COMMAND_REGISTRATION_DONE
+};
+
+static const struct command_registration xpc_usb_command_handlers[] = {
+	{
+		.name = "xpc_usb",
+		.mode = COMMAND_ANY,
+		.help = "perform xpc_usb management",
+		.chain = xpc_usb_subcommand_handlers,
+		.usage = "",
+	},
+	COMMAND_REGISTRATION_DONE
+};
+
 static struct jtag_interface xpc_usb_interface = {
 	.supported = DEBUG_CAP_TMS_SEQ,
 	.execute_queue = xpc_usb_execute_queue,
@@ -1110,6 +1329,7 @@ static struct jtag_interface xpc_usb_interface = {
 struct adapter_driver xpc_usb_adapter_driver = {
 	.name = "xpc_usb",
 	.transports = jtag_only,
+	.commands = xpc_usb_command_handlers,
 
 	.init = xpc_usb_init,
 	.quit = xpc_usb_quit,
