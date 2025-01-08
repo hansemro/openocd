@@ -68,6 +68,9 @@ enum xpc_type {
 /** Maximum number of frames that can fit in the command queue */
 #define XPC_MAX_CMD_FRAMES		(XPC_BUF_SIZE / XPC_FRAME_SIZE)
 
+/** Mask for single JTAG operation in a XPC command frame */
+#define XPC_CMD_OP_MASK			0x1111
+
 /** Assert TDI high in a TCK cycle */
 #define XPC_TDI					BIT(0)
 /** Assert TMS high in a TCK cycle */
@@ -455,7 +458,7 @@ static int xpc_usb_queue_cmd(struct xpc_usb *handle, uint16_t cmd)
 	cmd_ptr = handle->cmd_buf->cmds + (frame_idx * XPC_FRAME_SIZE);
 	bit_offset = handle->cmd_buf->num_pending_ops % XPC_MAX_OPS_PER_FRAME;
 	value = le_to_h_u16(cmd_ptr);
-	value |= (cmd & 0x1111) << bit_offset;
+	value |= (cmd & XPC_CMD_OP_MASK) << bit_offset;
 	h_u16_to_le(cmd_ptr, value);
 
 	handle->cmd_buf->num_pending_ops++;
