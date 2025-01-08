@@ -342,7 +342,7 @@ static int xpc_usb_jtag_transfer(struct xpc_usb *handle, size_t num_ops, uint8_t
 	assert(left_size > 0);
 	LOG_DEBUG("num_ops=0x%zx, num_blocks=0x%zx, left=0x%zx", num_ops, num_blocks, left);
 
-	// MSB of wValue = number of blocks (0x00-0xFF)
+	// MSB of wValue = number of 0x10000 operation blocks (0x00-0xFF)
 	// LSB of wValue = 0xA6
 	// wIndex = number of operations in last bulk transfer - 1 (0x0000-0xFFFF)
 	// Total number of operations = (MSB of wValue)*(0x10000) + (wIndex + 1)
@@ -356,7 +356,7 @@ static int xpc_usb_jtag_transfer(struct xpc_usb *handle, size_t num_ops, uint8_t
 		return ERROR_FAIL;
 	}
 
-	// transfer commands in 0x4000 byte chunks
+	// transfer commands in 0x4000 byte chunks (each with 0x8000 ops)
 	cmd_ptr = cmds;
 	for (size_t i = 0; i < num_blocks * 2; i++) {
 		err = jtag_libusb_bulk_write(handle->dev, handle->ep_out,
