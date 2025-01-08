@@ -105,32 +105,32 @@ struct xpc_usb {
 /**************************** Function Prototypes *****************************/
 
 /** USB helper functions */
-static int xpc_usb_open(struct xpc_usb **device);
-static int xpc_usb_close(struct xpc_usb **device);
+static int xpc_usb_open(struct xpc_usb **handle);
+static int xpc_usb_close(struct xpc_usb **handle);
 
 /** XPC-specific functions */
-static int xpc_usb_set_prescaler(struct xpc_usb *device, int value);
-static int xpc_usb_output_enable(struct xpc_usb *device, int enable);
-static int xpc_usb_write_gpio(struct xpc_usb *device, uint8_t bits);
-static int xpc_usb_read_gpio(struct xpc_usb *device, uint8_t *bits);
-static int xpc_usb_read_type(struct xpc_usb *device);
-static int xpc_usb_read_firmware_version(struct xpc_usb *device, uint16_t *version);
-static int xpc_usb_read_pld_version(struct xpc_usb *device, uint16_t *version);
-static int xpc_usb_jtag_transfer(struct xpc_usb *device, size_t num_ops,
+static int xpc_usb_set_prescaler(struct xpc_usb *handle, int value);
+static int xpc_usb_output_enable(struct xpc_usb *handle, int enable);
+static int xpc_usb_write_gpio(struct xpc_usb *handle, uint8_t bits);
+static int xpc_usb_read_gpio(struct xpc_usb *handle, uint8_t *bits);
+static int xpc_usb_read_type(struct xpc_usb *handle);
+static int xpc_usb_read_firmware_version(struct xpc_usb *handle, uint16_t *version);
+static int xpc_usb_read_pld_version(struct xpc_usb *handle, uint16_t *version);
+static int xpc_usb_jtag_transfer(struct xpc_usb *handle, size_t num_ops,
 		uint8_t *cmds, size_t num_tdo_bits, uint32_t *tdo_bits);
 
 /** JTAG queue functions */
-static int xpc_usb_queue_cmd(struct xpc_usb *device, uint16_t cmd);
-static int xpc_usb_clear_queue(struct xpc_usb *device, bool clear_tdo_bits);
-static int xpc_usb_flush_queue(struct xpc_usb *device);
-static int xpc_usb_queue_statemove(struct xpc_usb *device, int skip);
-static int xpc_usb_queue_pathmove(struct xpc_usb *device, struct jtag_command *cmd);
-static int xpc_usb_queue_scan(struct xpc_usb *device, struct jtag_command *cmd);
-static void xpc_usb_queue_reset(struct xpc_usb *device, struct jtag_command *cmd);
-static int xpc_usb_queue_runtest(struct xpc_usb *device, struct jtag_command *cmd);
-static int xpc_usb_queue_sleep(struct xpc_usb *device, struct jtag_command *cmd);
-static int xpc_usb_queue_stableclocks(struct xpc_usb *device, struct jtag_command *cmd);
-static int xpc_usb_queue_tms(struct xpc_usb *device, struct jtag_command *cmd);
+static int xpc_usb_queue_cmd(struct xpc_usb *handle, uint16_t cmd);
+static int xpc_usb_clear_queue(struct xpc_usb *handle, bool clear_tdo_bits);
+static int xpc_usb_flush_queue(struct xpc_usb *handle);
+static int xpc_usb_queue_statemove(struct xpc_usb *handle, int skip);
+static int xpc_usb_queue_pathmove(struct xpc_usb *handle, struct jtag_command *cmd);
+static int xpc_usb_queue_scan(struct xpc_usb *handle, struct jtag_command *cmd);
+static void xpc_usb_queue_reset(struct xpc_usb *handle, struct jtag_command *cmd);
+static int xpc_usb_queue_runtest(struct xpc_usb *handle, struct jtag_command *cmd);
+static int xpc_usb_queue_sleep(struct xpc_usb *handle, struct jtag_command *cmd);
+static int xpc_usb_queue_stableclocks(struct xpc_usb *handle, struct jtag_command *cmd);
+static int xpc_usb_queue_tms(struct xpc_usb *handle, struct jtag_command *cmd);
 
 /** adapter functions */
 static int xpc_usb_queue_command(struct jtag_command *cmd);
@@ -150,11 +150,11 @@ static struct xpc_usb *xpc_usb_handle;
 /**
  * Opens and claims an adapter.
  *
- * @param device pointer to XPC handle
+ * @param handle pointer to XPC handle
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_open(struct xpc_usb **device)
+static int xpc_usb_open(struct xpc_usb **handle)
 {
 	const uint16_t vids[] = { XILINX_VID, 0 };
 	const uint16_t pids[] = { PLATFORM_CABLE_PID, 0 };
@@ -163,8 +163,8 @@ static int xpc_usb_open(struct xpc_usb **device)
 	if (jtag_libusb_open(vids, pids, NULL, &dev, NULL) != ERROR_OK)
 		return ERROR_FAIL;
 
-	*device = calloc(1, sizeof(struct xpc_usb));
-	(*device)->dev = dev;
+	*handle = calloc(1, sizeof(struct xpc_usb));
+	(*handle)->dev = dev;
 
 	return ERROR_OK;
 }
@@ -172,17 +172,17 @@ static int xpc_usb_open(struct xpc_usb **device)
 /**
  * Closes and releases the adapter.
  *
- * @param device pointer to XPC handle
+ * @param handle pointer to XPC handle
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_close(struct xpc_usb **device)
+static int xpc_usb_close(struct xpc_usb **handle)
 {
-	if (device && *device && (*device)->dev) {
-		if (libusb_release_interface((*device)->dev, 0) != 0)
+	if (handle && *handle && (*handle)->dev) {
+		if (libusb_release_interface((*handle)->dev, 0) != 0)
 			return ERROR_FAIL;
-		libusb_close((*device)->dev);
-		(*device)->dev = NULL;
+		libusb_close((*handle)->dev);
+		(*handle)->dev = NULL;
 	}
 	return ERROR_OK;
 }
@@ -194,76 +194,76 @@ static int xpc_usb_close(struct xpc_usb **device)
  *
  * Maximum TCK Frequency = 24000000 / (2^(value - 0xf)) Hz
  *
- * @param device XPC adapter handle
+ * @param handle XPC adapter handle
  * @param value prescaler value (0xf-0x14)
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_set_prescaler(struct xpc_usb *device, int value)
+static int xpc_usb_set_prescaler(struct xpc_usb *handle, int value)
 {
 	// frequency does not change outside range [0xf:0x14]
 	if (value < 0xf || value > 0x14)
 		return ERROR_FAIL;
-	return jtag_libusb_control_transfer(device->dev, 0x40, 0xB0, 0x0028,
+	return jtag_libusb_control_transfer(handle->dev, 0x40, 0xB0, 0x0028,
 			value, NULL, 0, 1000, NULL);
 }
 
-static int xpc_usb_output_enable(struct xpc_usb *device, int enable)
+static int xpc_usb_output_enable(struct xpc_usb *handle, int enable)
 {
-	return jtag_libusb_control_transfer(device->dev, 0x40, 0xB0,
+	return jtag_libusb_control_transfer(handle->dev, 0x40, 0xB0,
 			enable ? 0x18 : 0x10, 0, NULL, 0, 1000, NULL);
 }
 
-static int xpc_usb_write_gpio(struct xpc_usb *device, uint8_t bits)
+static int xpc_usb_write_gpio(struct xpc_usb *handle, uint8_t bits)
 {
-	return jtag_libusb_control_transfer(device->dev, 0x40, 0xB0, 0x0030,
+	return jtag_libusb_control_transfer(handle->dev, 0x40, 0xB0, 0x0030,
 			bits, NULL, 0, 1000, NULL);
 }
 
-static int xpc_usb_read_gpio(struct xpc_usb *device, uint8_t *bits)
+static int xpc_usb_read_gpio(struct xpc_usb *handle, uint8_t *bits)
 {
-	return jtag_libusb_control_transfer(device->dev, 0xC0, 0xB0, 0x0038,
+	return jtag_libusb_control_transfer(handle->dev, 0xC0, 0xB0, 0x0038,
 			0, (char *)bits, 1, 1000, NULL);
 }
 
-static int xpc_usb_read_type(struct xpc_usb *device)
+static int xpc_usb_read_type(struct xpc_usb *handle)
 {
 	uint8_t buf[2] = {0};
 	uint16_t type = 0;
-	int err = jtag_libusb_control_transfer(device->dev, 0xC0, 0xB0, 0x0050,
+	int err = jtag_libusb_control_transfer(handle->dev, 0xC0, 0xB0, 0x0050,
 			0x0102, (char *)buf, 2, 1000, NULL);
 	if (err == ERROR_OK) {
 		type = le_to_h_u16(buf);
 		switch (type) {
 		case XPC_DLC9_TYPE:
-			device->type = XPC_DLC9_TYPE;
+			handle->type = XPC_DLC9_TYPE;
 			break;
 		case XPC_DLC10_TYPE:
-			device->type = XPC_DLC10_TYPE;
+			handle->type = XPC_DLC10_TYPE;
 			break;
 		default:
 			LOG_WARNING("Unknown type: %d", type);
-			device->type = XPC_UNKNOWN_TYPE;
+			handle->type = XPC_UNKNOWN_TYPE;
 		}
 	}
 	return err;
 }
 
-static int xpc_usb_read_firmware_version(struct xpc_usb *device, uint16_t *version)
+static int xpc_usb_read_firmware_version(struct xpc_usb *handle, uint16_t *version)
 {
 	uint8_t buf[2] = {0};
-	int err = jtag_libusb_control_transfer(device->dev, 0xC0, 0xB0, 0x0050,
+	int err = jtag_libusb_control_transfer(handle->dev, 0xC0, 0xB0, 0x0050,
 			0x0000, (char *)buf, 2, 1000, NULL);
 	if (err == ERROR_OK)
 		*version = le_to_h_u16(buf);
 	return err;
 }
 
-static int xpc_usb_read_pld_version(struct xpc_usb *device, uint16_t *version)
+static int xpc_usb_read_pld_version(struct xpc_usb *handle, uint16_t *version)
 {
 	uint8_t buf[2] = {0};
-	int err = jtag_libusb_control_transfer(device->dev, 0xC0, 0xB0, 0x0050,
-				device->type == XPC_DLC10_TYPE ? 0x0002 : 0x0001,
+	int err = jtag_libusb_control_transfer(handle->dev, 0xC0, 0xB0, 0x0050,
+				handle->type == XPC_DLC10_TYPE ? 0x0002 : 0x0001,
 				(char *)buf, 2, 1000, NULL);
 	if (err == ERROR_OK)
 		*version = le_to_h_u16(buf);
@@ -300,7 +300,7 @@ static int xpc_usb_read_pld_version(struct xpc_usb *device, uint16_t *version)
  * - bits 7-4: TMS bits
  * - bits 3-0: TDI bits
  *
- * @param device XPC adapter handle
+ * @param handle XPC adapter handle
  * @param num_ops total number of JTAG operations (0x1-0x1000000)
  * @param cmds pointer to packet with JTAG operations (in little endian)
  * @param num_tdo_bits number of bits to shift out from TDO (0x0-0x2000)
@@ -308,7 +308,7 @@ static int xpc_usb_read_pld_version(struct xpc_usb *device, uint16_t *version)
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_jtag_transfer(struct xpc_usb *device, size_t num_ops, uint8_t *cmds,
+static int xpc_usb_jtag_transfer(struct xpc_usb *handle, size_t num_ops, uint8_t *cmds,
 		size_t num_tdo_bits, uint32_t *tdo_bits)
 {
 	size_t num_blocks;
@@ -343,7 +343,7 @@ static int xpc_usb_jtag_transfer(struct xpc_usb *device, size_t num_ops, uint8_t
 	// LSB of wValue = 0xA6
 	// wIndex = number of operations in last bulk transfer - 1 (0x0000-0xFFFF)
 	// Total number of operations = (MSB of wValue)*(0x10000) + (wIndex + 1)
-	if (jtag_libusb_control_transfer(device->dev, 0x40, 0xB0,
+	if (jtag_libusb_control_transfer(handle->dev, 0x40, 0xB0,
 				(int)(0x00A6 | (num_blocks << 8)),
 				(int)(left - 1),
 				NULL, 0, 1000, NULL) != ERROR_OK) {
@@ -356,7 +356,7 @@ static int xpc_usb_jtag_transfer(struct xpc_usb *device, size_t num_ops, uint8_t
 	// transfer commands in 0x4000 byte chunks
 	cmd_ptr = cmds;
 	for (size_t i = 0; i < num_blocks * 2; i++) {
-		err = jtag_libusb_bulk_write(device->dev, device->ep_out,
+		err = jtag_libusb_bulk_write(handle->dev, handle->ep_out,
 				(char *)cmd_ptr, XPC_BULK_WRITE_SIZE, 6000, &actual);
 		if (err != ERROR_OK)
 			return err;
@@ -365,7 +365,7 @@ static int xpc_usb_jtag_transfer(struct xpc_usb *device, size_t num_ops, uint8_t
 	}
 
 	// transfer remaining (<= 0x10000) ops
-	err = jtag_libusb_bulk_write(device->dev, device->ep_out,
+	err = jtag_libusb_bulk_write(handle->dev, handle->ep_out,
 			(char *)cmd_ptr, (int)left_size, 6000, &actual);
 	if (err != ERROR_OK)
 		return err;
@@ -378,7 +378,7 @@ static int xpc_usb_jtag_transfer(struct xpc_usb *device, size_t num_ops, uint8_t
 			return ERROR_FAIL;
 
 		rd_ptr = rd_buf;
-		err = jtag_libusb_bulk_read(device->dev, device->ep_in,
+		err = jtag_libusb_bulk_read(handle->dev, handle->ep_in,
 				(char *)rd_ptr, (int)rd_size, 6000, &actual);
 		if (err != ERROR_OK) {
 			free(rd_buf);
@@ -419,11 +419,11 @@ static int xpc_usb_jtag_transfer(struct xpc_usb *device, size_t num_ops, uint8_t
  * before appending the command. Otherwise, if there are pending TDO reads,
  * the command will not be appended and this will return ERROR_FAIL;
  *
- * @param device XPC adapter handle
+ * @param handle XPC adapter handle
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_queue_cmd(struct xpc_usb *device, uint16_t cmd)
+static int xpc_usb_queue_cmd(struct xpc_usb *handle, uint16_t cmd)
 {
 	uint8_t *cmd_ptr;
 	int frame_idx;
@@ -431,36 +431,36 @@ static int xpc_usb_queue_cmd(struct xpc_usb *device, uint16_t cmd)
 	int bit_offset;
 	int err;
 
-	if (!device || !device->cmd_buf)
+	if (!handle || !handle->cmd_buf)
 		return ERROR_FAIL;
 
-	if (device->cmd_buf->num_pending_ops >= XPC_MAX_PENDING_OPS) {
+	if (handle->cmd_buf->num_pending_ops >= XPC_MAX_PENDING_OPS) {
 		// Flush if not shifting out of TDO
-		if (device->cmd_buf->num_pending_tdo_bits > 0)
+		if (handle->cmd_buf->num_pending_tdo_bits > 0)
 			return ERROR_FAIL;
-		err = xpc_usb_flush_queue(device);
+		err = xpc_usb_flush_queue(handle);
 		if (err != ERROR_OK)
 			return err;
 	}
 
-	assert(device->cmd_buf->num_pending_tdo_bits <= device->cmd_buf->num_pending_ops);
-	if (device->cmd_buf->num_pending_tdo_bits >= XPC_MAX_PENDING_TDO_BITS) {
+	assert(handle->cmd_buf->num_pending_tdo_bits <= handle->cmd_buf->num_pending_ops);
+	if (handle->cmd_buf->num_pending_tdo_bits >= XPC_MAX_PENDING_TDO_BITS) {
 		if ((cmd & XPC_TCK) && (cmd & XPC_TDO)) {
 			LOG_ERROR("Cannot queue any more TDO shift-out operations");
 			return ERROR_FAIL;
 		}
 	}
 
-	frame_idx = device->cmd_buf->num_pending_ops / XPC_MAX_OPS_PER_FRAME;
-	cmd_ptr = device->cmd_buf->cmds + (frame_idx * XPC_FRAME_SIZE);
-	bit_offset = device->cmd_buf->num_pending_ops % XPC_MAX_OPS_PER_FRAME;
+	frame_idx = handle->cmd_buf->num_pending_ops / XPC_MAX_OPS_PER_FRAME;
+	cmd_ptr = handle->cmd_buf->cmds + (frame_idx * XPC_FRAME_SIZE);
+	bit_offset = handle->cmd_buf->num_pending_ops % XPC_MAX_OPS_PER_FRAME;
 	value = le_to_h_u16(cmd_ptr);
 	value |= (cmd & 0x1111) << bit_offset;
 	h_u16_to_le(cmd_ptr, value);
 
-	device->cmd_buf->num_pending_ops++;
+	handle->cmd_buf->num_pending_ops++;
 	if ((cmd & XPC_TCK) && (cmd & XPC_TDO))
-		device->cmd_buf->num_pending_tdo_bits++;
+		handle->cmd_buf->num_pending_tdo_bits++;
 
 	return ERROR_OK;
 }
@@ -468,21 +468,21 @@ static int xpc_usb_queue_cmd(struct xpc_usb *device, uint16_t cmd)
 /**
  * Clear XPC command queue and, optionally, the shifted TDO bits.
  *
- * @param device XPC adapter handle
+ * @param handle XPC adapter handle
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_clear_queue(struct xpc_usb *device, bool clear_tdo_bits)
+static int xpc_usb_clear_queue(struct xpc_usb *handle, bool clear_tdo_bits)
 {
-	device->cmd_buf->num_pending_ops = 0;
-	device->cmd_buf->num_pending_tdo_bits = 0;
-	memset(device->cmd_buf->cmds, 0x00, XPC_BUF_SIZE * sizeof(uint8_t));
+	handle->cmd_buf->num_pending_ops = 0;
+	handle->cmd_buf->num_pending_tdo_bits = 0;
+	memset(handle->cmd_buf->cmds, 0x00, XPC_BUF_SIZE * sizeof(uint8_t));
 	if (clear_tdo_bits) {
-		if (device->cmd_buf->shifted_tdo_bits) {
-			free(device->cmd_buf->shifted_tdo_bits);
-			device->cmd_buf->shifted_tdo_bits = NULL;
+		if (handle->cmd_buf->shifted_tdo_bits) {
+			free(handle->cmd_buf->shifted_tdo_bits);
+			handle->cmd_buf->shifted_tdo_bits = NULL;
 		}
-		device->cmd_buf->num_shifted_tdo_bits = 0;
+		handle->cmd_buf->num_shifted_tdo_bits = 0;
 	}
 	return ERROR_OK;
 }
@@ -493,47 +493,47 @@ static int xpc_usb_clear_queue(struct xpc_usb *device, bool clear_tdo_bits)
  * A buffer for TDO bits that were shifted out will be allocated but should
  * eventually be cleared by caller with xpc_usb_clear_queue(device, true).
  *
- * @param device XPC adapter handle
+ * @param handle XPC adapter handle
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_flush_queue(struct xpc_usb *device)
+static int xpc_usb_flush_queue(struct xpc_usb *handle)
 {
 	size_t out_len = 0;
 	int err;
 
-	if (!device || !device->cmd_buf)
+	if (!handle || !handle->cmd_buf)
 		return ERROR_FAIL;
 
-	if (device->cmd_buf->num_pending_ops == 0)
+	if (handle->cmd_buf->num_pending_ops == 0)
 		return ERROR_OK;
 
-	assert(device->cmd_buf->num_pending_ops <= XPC_MAX_PENDING_OPS);
-	assert(device->cmd_buf->num_pending_tdo_bits <= XPC_MAX_PENDING_TDO_BITS);
+	assert(handle->cmd_buf->num_pending_ops <= XPC_MAX_PENDING_OPS);
+	assert(handle->cmd_buf->num_pending_tdo_bits <= XPC_MAX_PENDING_TDO_BITS);
 
-	if (device->cmd_buf->num_pending_tdo_bits > 0) {
-		if (device->cmd_buf->shifted_tdo_bits) {
+	if (handle->cmd_buf->num_pending_tdo_bits > 0) {
+		if (handle->cmd_buf->shifted_tdo_bits) {
 			LOG_DEBUG_IO("Discarding/freeing previous tdo_bits before transfer");
-			free(device->cmd_buf->shifted_tdo_bits);
-			device->cmd_buf->shifted_tdo_bits = NULL;
+			free(handle->cmd_buf->shifted_tdo_bits);
+			handle->cmd_buf->shifted_tdo_bits = NULL;
 		}
-		out_len = DIV_ROUND_UP(device->cmd_buf->num_pending_tdo_bits, 32) * sizeof(uint32_t);
-		device->cmd_buf->shifted_tdo_bits = calloc(out_len, sizeof(uint32_t));
-		device->cmd_buf->num_shifted_tdo_bits = 0;
-		if (!device->cmd_buf->shifted_tdo_bits) {
+		out_len = DIV_ROUND_UP(handle->cmd_buf->num_pending_tdo_bits, 32) * sizeof(uint32_t);
+		handle->cmd_buf->shifted_tdo_bits = calloc(out_len, sizeof(uint32_t));
+		handle->cmd_buf->num_shifted_tdo_bits = 0;
+		if (!handle->cmd_buf->shifted_tdo_bits) {
 			LOG_DEBUG("Failed to allocate %zu bytes for %zu bits", out_len,
-					device->cmd_buf->num_pending_tdo_bits);
+					handle->cmd_buf->num_pending_tdo_bits);
 			return ERROR_FAIL;
 		}
 	}
 
-	err = xpc_usb_jtag_transfer(device, device->cmd_buf->num_pending_ops,
-			device->cmd_buf->cmds, device->cmd_buf->num_pending_tdo_bits,
-			device->cmd_buf->shifted_tdo_bits);
+	err = xpc_usb_jtag_transfer(handle, handle->cmd_buf->num_pending_ops,
+			handle->cmd_buf->cmds, handle->cmd_buf->num_pending_tdo_bits,
+			handle->cmd_buf->shifted_tdo_bits);
 
 	if (err == ERROR_OK) {
-		device->cmd_buf->num_shifted_tdo_bits = device->cmd_buf->num_pending_tdo_bits;
-		xpc_usb_clear_queue(device, false);
+		handle->cmd_buf->num_shifted_tdo_bits = handle->cmd_buf->num_pending_tdo_bits;
+		xpc_usb_clear_queue(handle, false);
 	}
 
 	return err;
@@ -542,13 +542,13 @@ static int xpc_usb_flush_queue(struct xpc_usb *device)
 /**
  * Queue a sequence of TMS operations.
  *
- * @param device XPC adapter handle
+ * @param handle XPC adapter handle
  * @param cmd pointer to the command that shall be queued
  * @param skip number of starting TMS operations to skip
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_queue_statemove(struct xpc_usb *device, int skip)
+static int xpc_usb_queue_statemove(struct xpc_usb *handle, int skip)
 {
 	uint8_t tms_scan = tap_get_tms_path(tap_get_state(),
 			tap_get_end_state());
@@ -563,7 +563,7 @@ static int xpc_usb_queue_statemove(struct xpc_usb *device, int skip)
 			tap_state_name(tap_get_end_state()));
 
 	for (int i = skip; i < tms_count; i++) {
-		err = xpc_usb_queue_cmd(device, XPC_TCK | (tms_scan & (1 << i) ? XPC_TMS : 0x00));
+		err = xpc_usb_queue_cmd(handle, XPC_TCK | (tms_scan & (1 << i) ? XPC_TMS : 0x00));
 		if (err != ERROR_OK)
 			return err;
 	}
@@ -576,12 +576,12 @@ static int xpc_usb_queue_statemove(struct xpc_usb *device, int skip)
 /**
  * Queue a sequence of TMS operations.
  *
- * @param device XPC adapter handle
+ * @param handle XPC adapter handle
  * @param cmd pointer to the command that shall be queued
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_queue_pathmove(struct xpc_usb *device, struct jtag_command *cmd)
+static int xpc_usb_queue_pathmove(struct xpc_usb *handle, struct jtag_command *cmd)
 {
 	unsigned int num_states;
 	tap_state_t *path;
@@ -592,9 +592,9 @@ static int xpc_usb_queue_pathmove(struct xpc_usb *device, struct jtag_command *c
 
 	for (unsigned int i = 0; i < num_states; i++) {
 		if (path[i] == tap_state_transition(tap_get_state(), false)) {
-			err = xpc_usb_queue_cmd(device, XPC_TCK);
+			err = xpc_usb_queue_cmd(handle, XPC_TCK);
 		} else if (path[i] == tap_state_transition(tap_get_state(), true)) {
-			err = xpc_usb_queue_cmd(device, XPC_TCK | XPC_TMS);
+			err = xpc_usb_queue_cmd(handle, XPC_TCK | XPC_TMS);
 		} else {
 			LOG_ERROR("BUG: %s -> %s isn't a valid TAP transition.",
 				  tap_state_name(tap_get_state()),
@@ -615,12 +615,12 @@ static int xpc_usb_queue_pathmove(struct xpc_usb *device, struct jtag_command *c
  * Shift in/out bits while in Shift-DR or Shift-IR state and queue operation to
  * restore previous end state (if necessary).
  *
- * @param device XPC adapter handle
+ * @param handle XPC adapter handle
  * @param cmd pointer to the command that shall be performed
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_queue_scan(struct xpc_usb *device, struct jtag_command *cmd)
+static int xpc_usb_queue_scan(struct xpc_usb *handle, struct jtag_command *cmd)
 {
 	enum scan_type type = jtag_scan_type(cmd->cmd.scan);
 	tap_state_t saved_end_state = cmd->cmd.scan->end_state;
@@ -644,26 +644,26 @@ static int xpc_usb_queue_scan(struct xpc_usb *device, struct jtag_command *cmd)
 
 	if (ir_scan && tap_get_state() != TAP_IRSHIFT) {
 		tap_set_end_state(TAP_IRSHIFT);
-		err = xpc_usb_queue_statemove(device, 0);
+		err = xpc_usb_queue_statemove(handle, 0);
 		if (err != ERROR_OK)
 			goto out_err;
 		tap_set_end_state(saved_end_state);
 	} else if (!ir_scan && tap_get_state() != TAP_DRSHIFT) {
 		tap_set_end_state(TAP_DRSHIFT);
-		err = xpc_usb_queue_statemove(device, 0);
+		err = xpc_usb_queue_statemove(handle, 0);
 		if (err != ERROR_OK)
 			goto out_err;
 		tap_set_end_state(saved_end_state);
 	}
-	err = xpc_usb_flush_queue(device);
+	err = xpc_usb_flush_queue(handle);
 	if (err != ERROR_OK) {
 		LOG_ERROR("Failed to flush queue before shifting in/out bits: %d", err);
 		goto out_err;
 	}
 
-	assert(!device->cmd_buf->shifted_tdo_bits);
-	assert(device->cmd_buf->num_pending_tdo_bits == 0);
-	assert(device->cmd_buf->num_shifted_tdo_bits == 0);
+	assert(!handle->cmd_buf->shifted_tdo_bits);
+	assert(handle->cmd_buf->num_pending_tdo_bits == 0);
+	assert(handle->cmd_buf->num_shifted_tdo_bits == 0);
 
 	// Shift in/out data with TMS asserted for last bit
 	rd_ptr = buf;
@@ -674,7 +674,7 @@ static int xpc_usb_queue_scan(struct xpc_usb *device, struct jtag_command *cmd)
 		tdi = (type != SCAN_IN) ? buf_get_u32(rd_ptr, 0, write) : 0;
 		tms = left <= 32 ? BIT(write - 1) : 0;
 		for (size_t i = 0; i < write; i++) {
-			xpc_usb_queue_cmd(device, XPC_TCK |
+			xpc_usb_queue_cmd(handle, XPC_TCK |
 					(type != SCAN_OUT ? XPC_TDO : 0) |
 					(tms & BIT(i) ? XPC_TMS : 0) |
 					(tdi & BIT(i) ? XPC_TDI : 0));
@@ -685,25 +685,25 @@ static int xpc_usb_queue_scan(struct xpc_usb *device, struct jtag_command *cmd)
 		// - at maximum pending TDO shift-out operation threshold
 		// - at maximum pending JTAG operation threshold
 		// - queued last shift operations (below above thresholds)
-		if (device->cmd_buf->num_pending_tdo_bits >= XPC_MAX_PENDING_TDO_BITS ||
-				device->cmd_buf->num_pending_ops >= XPC_MAX_PENDING_OPS ||
+		if (handle->cmd_buf->num_pending_tdo_bits >= XPC_MAX_PENDING_TDO_BITS ||
+				handle->cmd_buf->num_pending_ops >= XPC_MAX_PENDING_OPS ||
 				left == 0) {
 			LOG_DEBUG("Flushing 0x%zx ops with 0x%zx remaining",
-					device->cmd_buf->num_pending_ops, left);
-			err = xpc_usb_flush_queue(device);
+					handle->cmd_buf->num_pending_ops, left);
+			err = xpc_usb_flush_queue(handle);
 			if (err != ERROR_OK)
 				goto out_err;
 			if (type != SCAN_OUT) {
 				for (size_t i = 0; conv_ptr < rd_ptr; i++) {
-					conv = MIN(32, device->cmd_buf->num_shifted_tdo_bits);
+					conv = MIN(32, handle->cmd_buf->num_shifted_tdo_bits);
 					buf_set_u32(conv_ptr, 0, conv,
-							device->cmd_buf->shifted_tdo_bits[i]);
-					device->cmd_buf->num_shifted_tdo_bits -= conv;
+							handle->cmd_buf->shifted_tdo_bits[i]);
+					handle->cmd_buf->num_shifted_tdo_bits -= conv;
 					conv_ptr += sizeof(uint32_t);
 				}
-				free(device->cmd_buf->shifted_tdo_bits);
-				device->cmd_buf->shifted_tdo_bits = NULL;
-				device->cmd_buf->num_shifted_tdo_bits = 0;
+				free(handle->cmd_buf->shifted_tdo_bits);
+				handle->cmd_buf->shifted_tdo_bits = NULL;
+				handle->cmd_buf->num_shifted_tdo_bits = 0;
 			}
 		}
 	}
@@ -712,7 +712,7 @@ static int xpc_usb_queue_scan(struct xpc_usb *device, struct jtag_command *cmd)
 	free(buf);
 
 	if (tap_get_state() != tap_get_end_state())
-		err = xpc_usb_queue_statemove(device, 1);
+		err = xpc_usb_queue_statemove(handle, 1);
 
 	return err;
 
@@ -721,7 +721,7 @@ out_err:
 	return ERROR_FAIL;
 }
 
-static void xpc_usb_queue_reset(struct xpc_usb *device, struct jtag_command *cmd)
+static void xpc_usb_queue_reset(struct xpc_usb *handle, struct jtag_command *cmd)
 {
 	LOG_DEBUG("reset trst: %i srst: %i", cmd->cmd.reset->trst,
 			cmd->cmd.reset->srst);
@@ -730,12 +730,12 @@ static void xpc_usb_queue_reset(struct xpc_usb *device, struct jtag_command *cmd
 /**
  * Queue operations to generate TCK cycles in Run-Test/Idle state.
  *
- * @param device XPC adapter handle
+ * @param handle XPC adapter handle
  * @param cmd pointer to the command that shall be queued
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_queue_runtest(struct xpc_usb *device, struct jtag_command *cmd)
+static int xpc_usb_queue_runtest(struct xpc_usb *handle, struct jtag_command *cmd)
 {
 	tap_state_t saved_end_state;
 	size_t num_cycles;
@@ -749,7 +749,7 @@ static int xpc_usb_queue_runtest(struct xpc_usb *device, struct jtag_command *cm
 
 	if (tap_get_state() != TAP_IDLE) {
 		tap_set_end_state(TAP_IDLE);
-		err = xpc_usb_queue_statemove(device, 0);
+		err = xpc_usb_queue_statemove(handle, 0);
 		if (err != ERROR_OK)
 			return err;
 	};
@@ -757,14 +757,14 @@ static int xpc_usb_queue_runtest(struct xpc_usb *device, struct jtag_command *cm
 	num_cycles = cmd->cmd.runtest->num_cycles;
 
 	for (size_t i = 0; i < num_cycles; i++) {
-		err = xpc_usb_queue_cmd(device, XPC_TCK);
+		err = xpc_usb_queue_cmd(handle, XPC_TCK);
 		if (err != ERROR_OK)
 			return err;
 	}
 
 	tap_set_end_state(saved_end_state);
 	if (tap_get_state() != tap_get_end_state())
-		err = xpc_usb_queue_statemove(device, 0);
+		err = xpc_usb_queue_statemove(handle, 0);
 
 	return err;
 }
@@ -772,16 +772,16 @@ static int xpc_usb_queue_runtest(struct xpc_usb *device, struct jtag_command *cm
 /**
  * Sleep for a specific amount of time (by flushing the queue then sleeping).
  *
- * @param device XPC adapter handle
+ * @param handle XPC adapter handle
  * @param cmd pointer to the command that shall be executed
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_queue_sleep(struct xpc_usb *device, struct jtag_command *cmd)
+static int xpc_usb_queue_sleep(struct xpc_usb *handle, struct jtag_command *cmd)
 {
 	int err;
 
-	err = xpc_usb_flush_queue(device);
+	err = xpc_usb_flush_queue(handle);
 	if (err != ERROR_OK)
 		return ERROR_FAIL;
 
@@ -793,12 +793,12 @@ static int xpc_usb_queue_sleep(struct xpc_usb *device, struct jtag_command *cmd)
 /**
  * Queue operations to generate TCK cycles while remaining in a stable state.
  *
- * @param device XPC adapter handle
+ * @param handle XPC adapter handle
  * @param cmd pointer to the command that shall be queued
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_queue_stableclocks(struct xpc_usb *device, struct jtag_command *cmd)
+static int xpc_usb_queue_stableclocks(struct xpc_usb *handle, struct jtag_command *cmd)
 {
 	unsigned int num_cycles;
 	int xpc_usb_cmd;
@@ -813,7 +813,7 @@ static int xpc_usb_queue_stableclocks(struct xpc_usb *device, struct jtag_comman
 	xpc_usb_cmd = XPC_TCK | (tap_get_state() == TAP_RESET ? XPC_TMS : 0);
 
 	while (num_cycles > 0) {
-		err = xpc_usb_queue_cmd(device, xpc_usb_cmd);
+		err = xpc_usb_queue_cmd(handle, xpc_usb_cmd);
 		if (err != ERROR_OK)
 			return err;
 		num_cycles--;
@@ -825,12 +825,12 @@ static int xpc_usb_queue_stableclocks(struct xpc_usb *device, struct jtag_comman
 /**
  * Queue a sequence of TMS operations.
  *
- * @param device XPC adapter handle
+ * @param handle XPC adapter handle
  * @param cmd pointer to the command that shall be queued
  * @return on success: ERROR_OK
  * @return on failure: ERROR_FAIL
  */
-static int xpc_usb_queue_tms(struct xpc_usb *device, struct jtag_command *cmd)
+static int xpc_usb_queue_tms(struct xpc_usb *handle, struct jtag_command *cmd)
 {
 	const size_t num_bits = cmd->cmd.tms->num_bits;
 	const uint8_t *bits = cmd->cmd.tms->bits;
@@ -845,7 +845,7 @@ static int xpc_usb_queue_tms(struct xpc_usb *device, struct jtag_command *cmd)
 		write = MIN(32, left);
 		tms = buf_get_u32(bits, 0, write);
 		for (size_t i = 0; i < write; i++) {
-			err = xpc_usb_queue_cmd(device, XPC_TCK |
+			err = xpc_usb_queue_cmd(handle, XPC_TCK |
 					(tms & BIT(i) ? XPC_TMS : 0));
 		}
 		if (err != ERROR_OK)
